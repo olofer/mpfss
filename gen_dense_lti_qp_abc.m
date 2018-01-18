@@ -26,7 +26,7 @@ function rep = gen_dense_lti_qp_abc(A, B, C, Qx, Qu, Qy, n)
 % where U is a stacking of u(i), and W is stacking of w(i), both i = 0..n-1;
 % Here (block-structured) P0, Pu, and Pw are members of rep.
 % Also let R be a stacking of r(i), i = 1..n, then the QP cost data (H, h, h0)
-% in the sense; 0.5*U'*H*U + U'*z + h0, can be instantiated from x(0), W, R 
+% in the sense; 0.5*U'*H*U + h'*U + h0, can be instantiated from x(0), W, R 
 % as follows.
 %
 % H = Hu + Pu'*(Hx+Cx'*Hy*Cx)*Pu
