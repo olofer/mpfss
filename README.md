@@ -18,3 +18,6 @@ https://doi.org/10.1088/0029-5515/53/7/072003
 
 * K. E. J. Olofsson _Extended benchmark results for impulse response estimation_
 https://doi.org/10.1109/CDC.2013.6761026
+
+* K. E. J. Olofsson et al. _Subspace identification analysis of RFX and T2R reversed-field pinches_
+https://doi.org/10.1016/j.conengprac.2013.03.004
