@@ -126,6 +126,12 @@ title(sprintf('Ts = %f ms; stdy=%e', Ts * 1e3, stdy));
 ords = [10 20 20 n]; % retain n states
 dterm = 0;
 rep = mpfssvarxbatchestlm(dat, ords, dterm);
+% the below simpler alternative works ~OK too;
+% but exhibits larger variance (fix with regularization or 
+% properly weighted model reduction)
+%rep = mpfvarx(dat, [30 30*ny], dterm);
+% (max order system is typically very accurate but its
+%  reduction is not optimal)
 % ***********************************************
 
 % Add sys0 to output struct
