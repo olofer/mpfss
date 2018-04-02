@@ -1,11 +1,14 @@
-function P = test_mfir(ny, nu, l)
-% function P = test_mfir(ny, nu, l) 
+function [P, bal] = test_mfir(ny, nu, l, r)
+% function [P, bal] = test_mfir(ny, nu, l, r) 
 %
 % Checks intended functionality of the mfir() program. 
 % Generates random FIR block coefficient with the specified
 % size ny-by-nu and the specified lag length l.
 %
 % All error print outs should be zero.
+%
+% Balanced truncation of the FIR representation will also
+% be checked if the r argument is provided (state order r).
 %
 
 H = randn(ny, l * nu);
@@ -60,5 +63,22 @@ for ii = 1:l
 end
 fprintf(1, 'norm(Q)  = %e\n', norm(eye(nd), 'fro'));
 fprintf(1, 'error(Q) = %e\n', norm(cum - eye(nd), 'fro'));
+
+% Basic optional check of balanced truncation code
+bal = [];
+if nargin > 3
+  [bal, T] = mfirred(H, l, H0, r);
+  % Check that T actually generates balanced Gramians P, Q
+  Pbal = T \ (P / (T'));
+  Qbal = T' * T;
+  Sbal = diag(Qbal);
+  % Check how far away from the diagonal target the balanced Gramians are.
+  norm_Qbal = norm(Qbal, 'fro');
+  fprintf(1, 'rel err Qbal = %e\n', norm(diag(Sbal) - Qbal, 'fro') / norm_Qbal);
+  norm_Pbal = norm(Pbal, 'fro');
+  fprintf(1, 'rel err Pbal = %e\n', norm(diag(Sbal) - Pbal, 'fro') / norm_Pbal);
+  fprintf(1, 'rel diff Pbal,Qbal = %e\n', norm(Pbal - Qbal, 'fro') / norm_Qbal);
+  % (print outs should be small 1e-14 , 1e-15 type numbers)
+end
 
 end
