@@ -126,7 +126,11 @@ cc = ny + nu;
 for ii = 2:p
   % due to structure of Apf; the next line could be optimized by
   % (block) shifting the previous columns in Mpf (to be done).
-  Mpf(:, (cc + 1):(cc + ny + nu)) = Apf * Mpf(:, (cc - ny - nu + 1):cc);
+  %Mpf(:, (cc + 1):(cc + ny + nu)) = Apf * Mpf(:, (cc - ny - nu + 1):cc);
+
+  % NOTE: there will be many zeros "pointlessly" assigned
+  % so the below line can still be improved
+  Mpf(1:((p - 1) * ny), (cc + 1):(cc + ny + nu)) = Mpf((ny + 1):end, (cc - ny - nu + 1):cc);
   cc = cc + ny + nu;
 end
 assert(cc == p * (ny + nu));
