@@ -1,5 +1,5 @@
-function rep = mpfvarx(DB, ords, dterm, autoscl)
-% function rep = mpfvarx(DB, ords, dterm, autoscl)
+function rep = mpfvarx(DB, ords, dterm, autoscl, cholla)
+% function rep = mpfvarx(DB, ords, dterm, autoscl, cholla)
 %
 % Estimate state-space system representation
 % directly from vector autoregressive (VARX)
@@ -20,6 +20,10 @@ function rep = mpfvarx(DB, ords, dterm, autoscl)
 %
 % autoscl = 1 to numerically condition
 % the I/O signals before estimating VARX.
+%
+% cholla >= 0 enables an alternative
+% calculation of the truncating transform.
+% (default is cholla < 0)
 %
 % Detrending / conditioning is the 
 % responsibility of the caller; 
@@ -55,11 +59,17 @@ assert(n >= 1 && n <= p * ny);
 assert(numel(dterm) == 1);
 assert(dterm == 0 || dterm == 1);
 
-if nargin <= 3
+if nargin < 4
   autoscl = 1;  % default is to autoscale signals (globally)
 end
 
 assert(autoscl == 0 || autoscl == 1);
+
+if nargin < 5
+  cholla = -1;  % default is to not use Cholesky weighted numerics
+end
+
+assert(numel(cholla) == 1 && isfinite(cholla));
 
 rep = struct;
 rep.ords = ords;
@@ -121,12 +131,23 @@ for ii = 2:p
 end
 assert(cc == p * (ny + nu));
 
-% Construct a weighted PCA-like transformation
-P = (Mpf * (ZZt / ntot)) * Mpf';  % weighted "Gramian"
-[Up, Sp, Vp] = svd(P);
-rep.sv = sqrt(diag(Sp));
-T = Up(:, 1:n) * diag(rep.sv(1:n));
-Ti = diag(1./rep.sv(1:n)) * Up(:, 1:n)';
+if cholla < 0
+  % Construct a weighted PCA-like transformation
+  P = (Mpf * (ZZt / ntot)) * Mpf';  % weighted "Gramian"
+  [Up, Sp, Vp] = svd(P);  % square decomp.
+  rep.sv = sqrt(diag(Sp));
+  T = Up(:, 1:n) * diag(rep.sv(1:n));
+  Ti = diag(1./rep.sv(1:n)) * Up(:, 1:n)';
+else
+  % alternative numerics; use with cholla = 0 for equivalence 
+  % to the standard code above; cholla > 0 allows "interpolation"
+  % between "standard" and "unweighted" (cholla very large)
+  L = chol(ZZt / ntot + cholla * eye(p * (nu + ny)), 'lower');
+  [Ul, Sl, Vl] = svd(Mpf * L, 'econ');  % reactangular decomp.
+  rep.sv = diag(Sl);
+  T = Ul(:, 1:n) * diag(rep.sv(1:n));
+  Ti = diag(1./rep.sv(1:n)) * Ul(:, 1:n)';
+end
 
 % Transform & truncate predictor to n states
 A = Ti * Apf * T;
@@ -194,7 +215,7 @@ Z = [u * scl_yu(2); y * scl_yu(1)];
 Y = zeros(ny, Neff);
 nzp = nz * p;
 if dterm > 0  % augment with direct term
-  Zp = zeros(nzq + nu, Neff);
+  Zp = zeros(nzp + nu, Neff);
   for k = k1:k2
     kk = k - k1 + 1;
     Y(:, kk) = y(:, k) * scl_yu(1);
