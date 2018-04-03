@@ -3,7 +3,8 @@ function rep = mpfvarx(DB, ords, dterm, autoscl)
 %
 % Estimate state-space system representation
 % directly from vector autoregressive (VARX)
-% block coefficients and balanced truncation.
+% block coefficients followed by weighted
+% truncation of the predictor form.
 %
 % DB is a cell array of input-output data
 % (vector time-series u, y; samples in columns).
@@ -20,10 +21,10 @@ function rep = mpfvarx(DB, ords, dterm, autoscl)
 % autoscl = 1 to numerically condition
 % the I/O signals before estimating VARX.
 %
-% Detrending or scaling is the 
-% responsibility of the caller; no
-% special preprocessing is done by
-% this routine.
+% Detrending / conditioning is the 
+% responsibility of the caller; 
+% rudimentary I/O scaling is 
+% performed automatically.
 %
 
 %
@@ -32,10 +33,12 @@ function rep = mpfvarx(DB, ords, dterm, autoscl)
 % which might significantly up the accuracy on 
 % smaller / marginally rich I/O datasets.
 %
-% TODO: another "obvious" improvement is to 
-% use better model reduction of the VARX system
-% (the information is there but the truncation
-%  need to be frequency weighted / subspace adapted)
+
+%
+% TODO: more extensive benchmarking of this simpler
+% approach compared to the subspace version; both 
+% should be able to do open- and closed loop but which
+% one is quicker (this), more accurate (?!), easier (this) ...
 %
 
 % Quick (incomplete) input sanity check:
@@ -74,7 +77,7 @@ end
 
 % Step 1: estimate VARX block coefficients
 scl_yu = [1 / rmsy, 1 / rmsu];
-[Ghat, ntot] = batchdvarxestcov(DB, p, dterm, scl_yu);
+[Ghat, ntot, ZZt] = batchdvarxestcov(DB, p, dterm, scl_yu);
 assert(size(Ghat, 1) == ny);
 
 rep.rmsyu = [rmsy, rmsu];
@@ -93,24 +96,52 @@ else
   D = Ghat(:, (1 + (nu + ny) * p):end);
   assert(size(D, 2) == nu && size(D, 1) == ny);
   H0 = [D, zeros(ny, ny)];
+  % The last nu rows and columns must be cut away
+  % prior to the model reduction step below.
+  ZZt = ZZt(1:((nu + ny) * p), 1:((nu + ny) * p));
 end
 
 % Step 2: create / truncate a predictor form representation
-% with [u; y] as input and yhat as output; VFIR system
-% so always stable and Gramians exist.
-tmp = mfirred(H, p, H0, n);
+% with [u; y] as input and yhat as output; 
+% Do not use the "balanced truncation" function; rather
+% do "weighted" truncation as follows.
 
 rep.H = H;
 rep.H0 = H0;
 
+[Apf, Bpf, Cpf, Dpf] = mfir(H, p, H0);
+Mpf = zeros(p * ny, p * (ny + nu));  % allocate input to state map
+Mpf(:, 1:(ny + nu)) = Bpf;
+cc = ny + nu;
+for ii = 2:p
+  % due to structure of Apf; the next line could be optimized by
+  % (block) shifting the previous columns in Mpf (to be done).
+  Mpf(:, (cc + 1):(cc + ny + nu)) = Apf * Mpf(:, (cc - ny - nu + 1):cc);
+  cc = cc + ny + nu;
+end
+assert(cc == p * (ny + nu));
+
+% Construct a weighted PCA-like transformation
+P = (Mpf * (ZZt / ntot)) * Mpf';  % weighted "Gramian"
+[Up, Sp, Vp] = svd(P);
+rep.sv = sqrt(diag(Sp));
+T = Up(:, 1:n) * diag(rep.sv(1:n));
+Ti = diag(1./rep.sv(1:n)) * Up(:, 1:n)';
+
+% Transform & truncate predictor to n states
+A = Ti * Apf * T;
+B = Ti * Bpf;
+C = Cpf * T;
+D = Dpf;
+
 % Step 3: pull out the system (A,B,C,D) from the 
 % reduced/stable predictor state space form.
 % Return data in output struct rep.
-rep.K = tmp.B(:, (nu+1):end);
-rep.D = tmp.D(:, 1:nu) * (rmsy / rmsu);
-rep.C = tmp.C;
-rep.B = (tmp.B(:, 1:nu) + rep.K * tmp.D(:, 1:nu)) * (rmsy / rmsu);
-rep.A = tmp.A + rep.K * rep.C;
+rep.K = B(:, (nu+1):end);
+rep.D = D(:, 1:nu) * (rmsy / rmsu);
+rep.C = C;
+rep.B = (B(:, 1:nu) + rep.K * D(:, 1:nu)) * (rmsy / rmsu);
+rep.A = A + rep.K * rep.C;
 
 assert(size(rep.A, 1) == n);
 assert(size(rep.B, 1) == n);
@@ -131,7 +162,7 @@ Ryy = (1/nnb) * Ryy;
 Ruu = (1/nnb) * Ruu;
 end
 
-function [Ghat, nt] = batchdvarxestcov(DB, p, dterm, scl_yu)
+function [Ghat, nt, ZZt, YZt] = batchdvarxestcov(DB, p, dterm, scl_yu)
 % General estimation of vector autoregressive models (VARXs)
 % with optional direct term D from input-output data;
 % VARX order is p (=na=nb); does batch-by-batch squaring.

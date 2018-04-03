@@ -126,21 +126,19 @@ title(sprintf('Ts = %f ms; stdy=%e', Ts * 1e3, stdy));
 ords = [10 20 20 n]; % retain n states
 dterm = 0;
 rep = mpfssvarxbatchestlm(dat, ords, dterm);
-% the below simpler alternative works ~OK too;
-% but exhibits larger variance (fix with regularization or 
-% properly weighted model reduction)
-%rep = mpfvarx(dat, [30 30*ny], dterm);
-% (max order system is typically very accurate but its
-%  reduction is not optimal)
+% alternative approach using direct VARX then weighted
+% model reduction; works good too!
+rep2 = mpfvarx(dat, [30 n], dterm);
 % ***********************************************
 
 % Add sys0 to output struct
 rep.sys0 = sys0;
 
 syses = ss(rep.A, rep.B, rep.C, 0, -1);
+syses2 = ss(rep2.A, rep2.B, rep2.C, 0, -1);
 
 figure;
-sigma(sysdt, 'b-', syses, 'r-');
+sigma(sysdt, 'b-', syses, 'r-', syses2, 'g-');
 
 % Finally plot the eigenvalues also
 figure;
@@ -151,9 +149,11 @@ E0 = eig(sysdt.A);
 plot(real(E0), imag(E0), 'bx');
 E1 = eig(rep.A);
 plot(real(E1), imag(E1), 'ro');
+E2 = eig(rep2.A);
+plot(real(E2), imag(E2), 'gd');
 axis equal;
 xlabel('Re(eig)');
 ylabel('Im(eig)');
-title('blue = truth, red = estimated');
+title('blue = truth, red = estim., green=estim.alt.');
 
 end
