@@ -1,5 +1,5 @@
 # mpfss
-Open- and closed-loop predictor-form subspace system identification.
+Open- and closed-loop predictor-form (subspace) system identification.
 
 Linear time-invariant system identification from multivariate input/output data.
 
@@ -9,7 +9,7 @@ Linear time-invariant system identification from multivariate input/output data.
 https://doi.org/10.1016/j.compchemeng.2006.05.045
 
 * M. Jansson _Subspace identification and ARX modeling_
-IFAC Symposium on System Identification 2003
+https://doi.org/10.1016/S1474-6670(17)34986-8
 
 ## Battle-tested
 
