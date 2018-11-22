@@ -14,6 +14,8 @@ function [dat, rep] = test_mpfss(num_batches, samples_per_batch)
 % The time-series samples for the individual batches
 % will be plotted if no outputs arguments are specified.
 %
+% Call without second output to only generate the dataset.
+%
 % NOTE: tested with both OCTAVE (4.2.0) and MATLAB (R2016b).
 %
 
@@ -102,6 +104,10 @@ for bb = 1:num_batches
     ylabel('outputs y');
     xlabel(sprintf('batch #%i time [sec]', bb));
   end
+end
+
+if nargout < 2
+  return;
 end
 
 % Automatically call the subspace sysid code; process all batches into a single system estimate
