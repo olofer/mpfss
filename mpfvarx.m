@@ -1,5 +1,5 @@
-function rep = mpfvarx(DB, ords, dterm, autoscl, cholla)
-% function rep = mpfvarx(DB, ords, dterm, autoscl, cholla)
+function rep = mpfvarx(DB, ords, dterm, autoscl, cholla, lambda)
+% function rep = mpfvarx(DB, ords, dterm, autoscl, cholla, lambda)
 %
 % Estimate state-space system representation
 % directly from vector autoregressive (VARX)
@@ -30,19 +30,27 @@ function rep = mpfvarx(DB, ords, dterm, autoscl, cholla)
 % rudimentary I/O scaling is 
 % performed automatically.
 %
+% If lambda is provided and if it is a scalar then
+% lambda >= 0 is a ridge regression penelty multiplier
+% used to estimate the VARX parameter blocks.
+%
+% If lambda is a vector with elements >= 0 then
+% the program will generate a leave-one-batch-out
+% cross validation evaluation of the VARX stage
+% and then stop (without returning any selected model).
+%
 
-%
-% TODO: one "obvious" improvement to this
-% code is to support regularized VARX estimation
-% which might significantly up the accuracy on 
-% smaller / marginally rich I/O datasets.
-%
+scalar_lambda_is_provided = (nargin > 5) && numel(lambda) == 1 && lambda >= 0;
+vector_lambda_is_provided = (nargin > 5) && numel(lambda) > 1 && all(lambda >= 0);
 
 %
 % TODO: more extensive benchmarking of this simpler
 % approach compared to the subspace version; both 
 % should be able to do open- and closed loop but which
 % one is quicker (this), more accurate (?!), easier (this) ...
+%
+% TODO: extend the autoscaling option to vectors
+% (each channel has its own rms)
 %
 
 % Quick (incomplete) input sanity check:
@@ -85,12 +93,43 @@ if autoscl == 1
   rmsu = sqrt(trace(Ruu) / nu);
 end
 
-% Step 1: estimate VARX block coefficients
 scl_yu = [1 / rmsy, 1 / rmsu];
-[Ghat, ntot, ZZt] = batchdvarxestcov(DB, p, dterm, scl_yu);
+rep.rmsyu = [rmsy, rmsu];
+
+if vector_lambda_is_provided
+  % Run a leave-one-batch-out cross-validation scheme then stop;
+  % investigate errpred afterwards to select model..
+  ellvec = lambda;
+  errpred = lobo_cv_evaluate(DB, p, dterm, scl_yu, ellvec);
+  rep.ellvec = ellvec;
+  rep.errpred = errpred;
+  % auto-generate the "best" lambda
+  tmp = squeeze(mean(rep.errpred, 1));
+  mtmp = mean(tmp, 1);
+  [~, idxsel] = min(mtmp);
+  rep.lambda_select_single = rep.ellvec(idxsel);
+  if nargout == 0  % auto-generate a plot in this case
+    figure;
+    plot(log10(rep.ellvec), tmp, 'o');
+    hold on;
+    plot(log10(rep.ellvec), mtmp, 'LineWidth', 2, 'Color', 'k');
+    A = axis;
+    line([1, 1] * log10(rep.lambda_select_single), [A(3), A(4)], 'Color', 'k', 'LineStyle', '--');
+    xlabel('log10(lambda)');
+    ylabel('average root mean square error');
+    grid on;
+    title(sprintf('Leave-one-batch-out CV (%i batches)', numel(DB)));
+  end
+  return;
+end
+
+% Step 1: estimate VARX block coefficients
+ell = 0;
+if scalar_lambda_is_provided, ell = lambda; end
+[Ghat, ntot, ZZt] = batchdvarxestcov(DB, p, dterm, scl_yu, ell);
 assert(size(Ghat, 1) == ny);
 
-rep.rmsyu = [rmsy, rmsu];
+rep.ell = ell;
 rep.ntot = ntot;  % total number of time-stamps used.
 rep.spp = ntot / (p * ny);  % samples per parameter
 
@@ -187,7 +226,7 @@ Ryy = (1/nnb) * Ryy;
 Ruu = (1/nnb) * Ruu;
 end
 
-function [Ghat, nt, ZZt, YZt] = batchdvarxestcov(DB, p, dterm, scl_yu)
+function [Ghat, nt, ZZt, YZt] = batchdvarxestcov(DB, p, dterm, scl_yu, ell)
 % General estimation of vector autoregressive models (VARXs)
 % with optional direct term D from input-output data;
 % VARX order is p (=na=nb); does batch-by-batch squaring.
@@ -203,7 +242,12 @@ for bb = 2:nb
   ZZt = ZZt + Zb * Zb';
   nt = nt + size(DB{bb}.y, 2);
 end
-Ghat = YZt / ZZt;
+if ell == 0
+  Ghat = YZt / ZZt;
+else
+  nz = size(ZZt, 1);
+  Ghat = YZt / (ZZt + eye(nz)*ell);
+end
 end
 
 % Create regressor for one contiguous batch of time-series data
@@ -231,6 +275,41 @@ else  % no direct term
     kk = k - k1 + 1;
     Y(:, kk) = y(:, k) * scl_yu(1);
     Zp(:, kk) = reshape(Z(:, (k-1):-1:(k-p)), nzp, 1);
+  end
+end
+end
+
+% errpred (root-mean-square) is indexed by the triple (batch, output, lambda)
+function errpred = lobo_cv_evaluate(DB, p, dterm, scl_yu, ellvec)
+nb = numel(DB);
+nl = numel(ellvec);
+assert(nb >= 2, 'at least 2 batches required');
+% Start by evaluating the "total" covariance matrices
+[Yb, Zb] = dvarxdata(DB{1}.y, DB{1}.u, p, dterm, scl_yu);
+nt = size(DB{1}.y, 2);
+YZt = Yb * Zb';
+ZZt = Zb * Zb';
+for bb = 2:nb
+  [Yb, Zb] = dvarxdata(DB{bb}.y, DB{bb}.u, p, dterm, scl_yu);
+  YZt = YZt + Yb * Zb';
+  ZZt = ZZt + Zb * Zb';
+  nt = nt + size(DB{bb}.y, 2);
+end
+nz = size(ZZt, 1);
+ny = size(DB{1}.y, 1);
+errfit = NaN(nb, ny, nl);
+errpred = NaN(nb, ny, nl);
+% Test evaluate predictions on each batch by holding it out from the fit
+for bb = 1:nb
+  [Yb, Zb] = dvarxdata(DB{bb}.y, DB{bb}.u, p, dterm, scl_yu);
+  YZtb = YZt - Yb * Zb';
+  ZZtb = ZZt - Zb * Zb';
+  nb = size(DB{bb}.y, 2); % test set size = nb; train set is nt - nb
+  for ll = 1:nl
+    Gbl = YZtb / (ZZtb + eye(nz)*ellvec(ll));
+    Ebl = Yb - Gbl * Zb;  % size is ny-by-nb
+    rmsebl = sqrt((1/nb) * sum(Ebl.^2, 2));
+    errpred(bb, :, ll) = rmsebl;
   end
 end
 end
